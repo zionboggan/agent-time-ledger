@@ -26,6 +26,47 @@ func FormatRFC3339(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+func FormatRFC3339In(t time.Time, location *time.Location) string {
+	return t.In(location).Format(time.RFC3339Nano)
+}
+
+func LoadLocation(name string) (*time.Location, error) {
+	switch strings.TrimSpace(strings.ToLower(name)) {
+	case "", "local":
+		return time.Local, nil
+	case "utc", "z":
+		return time.UTC, nil
+	default:
+		location, err := time.LoadLocation(name)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timezone %q: %w", name, err)
+		}
+		return location, nil
+	}
+}
+
+func LocationName(location *time.Location) string {
+	if location == nil {
+		return "UTC"
+	}
+	if location == time.Local {
+		return "Local"
+	}
+	return location.String()
+}
+
+func UTCOffset(t time.Time) string {
+	_, offset := t.Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	hours := offset / 3600
+	minutes := (offset % 3600) / 60
+	return fmt.Sprintf("%s%02d:%02d", sign, hours, minutes)
+}
+
 func ParseRFC3339(value string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {

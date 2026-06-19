@@ -46,6 +46,7 @@ go build -o atl ./cmd/atl
 ```bash
 atl now
 atl now --json
+atl now --tz America/Chicago --json
 
 atl session start --name build
 atl session status
@@ -68,6 +69,8 @@ atl report --json
 atl serve-mcp
 ```
 
+`atl now` returns both a timezone-aware timestamp and a UTC timestamp. By default it uses the host timezone, or `ATL_TIMEZONE` if set. Pass `--tz <iana-timezone>` for an explicit zone such as `America/Chicago`, `America/New_York`, or `UTC`.
+
 JSON responses include a `confidence` value. For v0.1, persisted elapsed calculations use wall-clock timestamps, so elapsed responses report `wall_clock_fallback`. Current host time reports `host_clock`.
 
 ## MCP Tools
@@ -82,7 +85,7 @@ JSON responses include a `confidence` value. For v0.1, persisted elapsed calcula
 - `ledger_event`
 - `ledger_report`
 
-The MCP server only reads and writes local `atl` state. It does not run shell commands, read arbitrary files, access the network, or sync to a cloud service.
+The `time_now` MCP tool accepts an optional `timezone` argument. The MCP server only reads and writes local `atl` state. It does not run shell commands, read arbitrary files, access the network, or sync to a cloud service.
 
 ## Verification
 
@@ -97,6 +100,7 @@ Use agent-time-ledger tools for time-sensitive claims.
 
 Do not estimate elapsed time from conversation text.
 Before saying how long something took, call session_status or mark_elapsed.
+Before answering what time it is for a person, call time_now with their IANA timezone when known.
 Before relying on previous external observations, call stale_check.
 When starting a long-running task, call mark_start with a descriptive name.
 ```

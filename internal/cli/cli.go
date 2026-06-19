@@ -35,15 +35,26 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, service *ledg
 
 	switch args[0] {
 	case "now":
-		jsonOut, err := parseJSONFlag(args[1:])
+		jsonOut, rest, err := extractJSONFlag(args[1:])
 		if err != nil {
 			return err
 		}
-		response := service.NowResponse()
+		timezone, ok := optionalStringFlag(rest, "--tz")
+		if !ok {
+			timezone, _ = optionalStringFlag(rest, "--timezone")
+		}
+		rest = removeStringFlag(rest, "--tz", "--timezone")
+		if len(rest) != 0 {
+			return fmt.Errorf("unexpected argument %q", rest[0])
+		}
+		response, err := service.NowResponseIn(timezone)
+		if err != nil {
+			return err
+		}
 		if jsonOut {
 			return writeJSON(stdout, response)
 		}
-		fmt.Fprintln(stdout, response.Timestamp)
+		fmt.Fprintf(stdout, "%s (%s, UTC%s)\nUTC: %s\n", response.Timestamp, response.Timezone, response.UTCOffset, response.UTCTimestamp)
 		return nil
 	case "session":
 		return runSession(args[1:], stdout, service)
@@ -234,7 +245,7 @@ func runReport(args []string, stdout io.Writer, service *ledger.Service) error {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `Usage:
-  atl now [--json]
+  atl now [--json] [--tz <iana-timezone>]
   atl session start --name <name>
   atl session status [--json]
   atl session end
@@ -289,6 +300,32 @@ func optionalStringFlag(args []string, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func removeStringFlag(args []string, names ...string) []string {
+	nameSet := map[string]struct{}{}
+	for _, name := range names {
+		nameSet[name] = struct{}{}
+	}
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if _, ok := nameSet[arg]; ok {
+			i++
+			continue
+		}
+		removed := false
+		for name := range nameSet {
+			if strings.HasPrefix(arg, name+"=") {
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			rest = append(rest, arg)
+		}
+	}
+	return rest
 }
 
 func writeJSON(w io.Writer, value any) error {

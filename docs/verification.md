@@ -11,12 +11,14 @@ go test ./...
 go vet ./...
 go build -o /tmp/atl-smoke ./cmd/atl
 ATL_HOME="$(mktemp -d)" /tmp/atl-smoke now --json
+ATL_HOME="$(mktemp -d)" /tmp/atl-smoke now --tz America/Chicago --json
 ATL_HOME="$(mktemp -d)" /tmp/atl-smoke serve-mcp
 ```
 
 Covered behavior:
 
 - RFC3339 timestamp output
+- timezone-aware `now` output with UTC offset
 - human duration formatting
 - TTL parsing for `15s`, `30m`, `2h`, and `1d`
 - stale checks before and after TTL expiry

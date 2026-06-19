@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/zionboggan/agent-time-ledger/internal/clock"
@@ -9,15 +10,18 @@ import (
 )
 
 type Service struct {
-	Store *state.Store
-	Now   func() time.Time
+	Store           *state.Store
+	Now             func() time.Time
+	DefaultTimezone string
 }
 
 type NowResponse struct {
-	Timestamp  string `json:"timestamp"`
-	Unix       int64  `json:"unix"`
-	Timezone   string `json:"timezone"`
-	Confidence string `json:"confidence"`
+	Timestamp    string `json:"timestamp"`
+	UTCTimestamp string `json:"utc_timestamp"`
+	Unix         int64  `json:"unix"`
+	Timezone     string `json:"timezone"`
+	UTCOffset    string `json:"utc_offset"`
+	Confidence   string `json:"confidence"`
 }
 
 type SessionStatusResponse struct {
@@ -72,17 +76,31 @@ type ReportResponse struct {
 }
 
 func NewService(store *state.Store) *Service {
-	return &Service{Store: store, Now: clock.Now}
+	return &Service{Store: store, Now: clock.Now, DefaultTimezone: os.Getenv("ATL_TIMEZONE")}
 }
 
-func (s *Service) NowResponse() NowResponse {
-	now := s.now()
-	return NowResponse{
-		Timestamp:  clock.FormatRFC3339(now),
-		Unix:       now.Unix(),
-		Timezone:   "UTC",
-		Confidence: clock.ConfidenceHostClock,
+func (s *Service) NowResponse() (NowResponse, error) {
+	return s.NowResponseIn("")
+}
+
+func (s *Service) NowResponseIn(timezone string) (NowResponse, error) {
+	if timezone == "" {
+		timezone = s.DefaultTimezone
 	}
+	location, err := clock.LoadLocation(timezone)
+	if err != nil {
+		return NowResponse{}, err
+	}
+	now := s.now()
+	localNow := now.In(location)
+	return NowResponse{
+		Timestamp:    clock.FormatRFC3339In(now, location),
+		UTCTimestamp: clock.FormatRFC3339(now),
+		Unix:         now.Unix(),
+		Timezone:     clock.LocationName(location),
+		UTCOffset:    clock.UTCOffset(localNow),
+		Confidence:   clock.ConfidenceHostClock,
+	}, nil
 }
 
 func (s *Service) StartSession(name string) (SessionStatusResponse, error) {

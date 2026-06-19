@@ -1,0 +1,150 @@
+package ledger
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/zionboggan/agent-time-ledger/internal/state"
+)
+
+func TestNowResponseIsRFC3339(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	response := service.NowResponse()
+	if _, err := time.Parse(time.RFC3339Nano, response.Timestamp); err != nil {
+		t.Fatalf("timestamp %q is not RFC3339: %v", response.Timestamp, err)
+	}
+	if response.Confidence != "host_clock" {
+		t.Fatalf("confidence = %q, want host_clock", response.Confidence)
+	}
+}
+
+func TestStaleCheckFreshBeforeTTL(t *testing.T) {
+	now := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	service := testService(t, now)
+	response, err := service.StaleFromTimestamp(now.Add(-14*time.Minute), 15*time.Minute)
+	if err != nil {
+		t.Fatalf("StaleFromTimestamp returned error: %v", err)
+	}
+	if response.Stale {
+		t.Fatal("expected fresh before TTL")
+	}
+}
+
+func TestStaleCheckStaleAfterTTL(t *testing.T) {
+	now := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	service := testService(t, now)
+	response, err := service.StaleFromTimestamp(now.Add(-16*time.Minute), 15*time.Minute)
+	if err != nil {
+		t.Fatalf("StaleFromTimestamp returned error: %v", err)
+	}
+	if !response.Stale {
+		t.Fatal("expected stale after TTL")
+	}
+}
+
+func TestMissingMarkError(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	if _, err := service.MarkElapsed("missing"); err == nil {
+		t.Fatal("expected missing mark error")
+	}
+}
+
+func TestSessionStatusNoActiveSession(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	status, err := service.SessionStatus()
+	if err != nil {
+		t.Fatalf("SessionStatus returned error: %v", err)
+	}
+	if status.Active {
+		t.Fatal("expected no active session")
+	}
+}
+
+func TestStatePersistence(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	first := NewService(state.NewStore(dir))
+	first.Now = func() time.Time { return start }
+	if _, err := first.StartSession("build"); err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+	if _, err := first.StartMark("compile"); err != nil {
+		t.Fatalf("StartMark returned error: %v", err)
+	}
+
+	second := NewService(state.NewStore(dir))
+	second.Now = func() time.Time { return start.Add(2 * time.Hour) }
+	status, err := second.SessionStatus()
+	if err != nil {
+		t.Fatalf("SessionStatus returned error: %v", err)
+	}
+	if !status.Active || status.Name != "build" {
+		t.Fatalf("unexpected persisted status: %+v", status)
+	}
+	if status.ElapsedSeconds != 7200 {
+		t.Fatalf("elapsed = %f, want 7200", status.ElapsedSeconds)
+	}
+	mark, err := second.MarkElapsed("compile")
+	if err != nil {
+		t.Fatalf("MarkElapsed returned error: %v", err)
+	}
+	if mark.ElapsedSeconds != 7200 {
+		t.Fatalf("mark elapsed = %f, want 7200", mark.ElapsedSeconds)
+	}
+}
+
+func TestJSONLEventValidity(t *testing.T) {
+	dir := t.TempDir()
+	service := NewService(state.NewStore(dir))
+	service.Now = func() time.Time {
+		return time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	}
+	if _, err := service.StartSession("build"); err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+	if _, err := service.StartMark("compile"); err != nil {
+		t.Fatalf("StartMark returned error: %v", err)
+	}
+	if err := service.DeleteMark("compile"); err != nil {
+		t.Fatalf("DeleteMark returned error: %v", err)
+	}
+	if _, err := service.StaleFromTimestamp(service.Now().Add(-2*time.Hour), time.Hour); err != nil {
+		t.Fatalf("StaleFromTimestamp returned error: %v", err)
+	}
+
+	file, err := os.Open(filepath.Join(dir, state.EventsFile))
+	if err != nil {
+		t.Fatalf("open events file: %v", err)
+	}
+	defer file.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		count++
+		var event state.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatalf("event line %d is invalid JSON: %v", count, err)
+		}
+		if event.Type == "" || event.Timestamp.IsZero() {
+			t.Fatalf("event line %d missing type or timestamp: %+v", count, event)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan events: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("event count = %d, want 4", count)
+	}
+}
+
+func testService(t *testing.T, now time.Time) *Service {
+	t.Helper()
+	service := NewService(state.NewStore(t.TempDir()))
+	service.Now = func() time.Time { return now }
+	return service
+}

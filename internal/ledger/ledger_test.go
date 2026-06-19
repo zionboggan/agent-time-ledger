@@ -13,12 +13,38 @@ import (
 
 func TestNowResponseIsRFC3339(t *testing.T) {
 	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
-	response := service.NowResponse()
+	response, err := service.NowResponse()
+	if err != nil {
+		t.Fatalf("NowResponse returned error: %v", err)
+	}
 	if _, err := time.Parse(time.RFC3339Nano, response.Timestamp); err != nil {
 		t.Fatalf("timestamp %q is not RFC3339: %v", response.Timestamp, err)
 	}
+	if _, err := time.Parse(time.RFC3339Nano, response.UTCTimestamp); err != nil {
+		t.Fatalf("utc timestamp %q is not RFC3339: %v", response.UTCTimestamp, err)
+	}
 	if response.Confidence != "host_clock" {
 		t.Fatalf("confidence = %q, want host_clock", response.Confidence)
+	}
+}
+
+func TestNowResponseTimezone(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	response, err := service.NowResponseIn("America/Chicago")
+	if err != nil {
+		t.Fatalf("NowResponseIn returned error: %v", err)
+	}
+	if response.Timezone != "America/Chicago" {
+		t.Fatalf("timezone = %q, want America/Chicago", response.Timezone)
+	}
+	if response.UTCOffset != "-05:00" {
+		t.Fatalf("utc offset = %q, want -05:00", response.UTCOffset)
+	}
+	if response.Timestamp != "2026-06-19T01:30:00-05:00" {
+		t.Fatalf("timestamp = %q, want Central daylight timestamp", response.Timestamp)
+	}
+	if response.UTCTimestamp != "2026-06-19T06:30:00Z" {
+		t.Fatalf("utc timestamp = %q, want 2026-06-19T06:30:00Z", response.UTCTimestamp)
 	}
 }
 

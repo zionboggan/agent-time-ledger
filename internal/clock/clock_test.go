@@ -42,3 +42,14 @@ func TestRFC3339RoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %s, want %s", got, now)
 	}
 }
+
+func TestLoadLocationAndOffset(t *testing.T) {
+	location, err := LoadLocation("America/Chicago")
+	if err != nil {
+		t.Fatalf("LoadLocation returned error: %v", err)
+	}
+	now := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC).In(location)
+	if got := UTCOffset(now); got != "-05:00" {
+		t.Fatalf("UTCOffset = %q, want -05:00", got)
+	}
+}

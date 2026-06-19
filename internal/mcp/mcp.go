@@ -27,6 +27,11 @@ type response struct {
 	Error   *rpcError `json:"error,omitempty"`
 }
 
+type message struct {
+	Body   []byte
+	Framed bool
+}
+
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -35,6 +40,10 @@ type rpcError struct {
 type toolCallParams struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+type initializeParams struct {
+	ProtocolVersion string `json:"protocolVersion"`
 }
 
 type callResult struct {
@@ -50,7 +59,7 @@ type content struct {
 func Serve(stdin io.Reader, stdout, stderr io.Writer, service *ledger.Service) error {
 	reader := bufio.NewReader(stdin)
 	for {
-		body, err := readMessage(reader)
+		msg, err := readMessage(reader)
 		if err == io.EOF {
 			return nil
 		}
@@ -58,13 +67,13 @@ func Serve(stdin io.Reader, stdout, stderr io.Writer, service *ledger.Service) e
 			fmt.Fprintln(stderr, err)
 			return err
 		}
-		if len(bytes.TrimSpace(body)) == 0 {
+		if len(bytes.TrimSpace(msg.Body)) == 0 {
 			continue
 		}
 
 		var req request
-		if err := json.Unmarshal(body, &req); err != nil {
-			_ = writeMessage(stdout, response{
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			_ = writeMessage(stdout, msg.Framed, response{
 				JSONRPC: "2.0",
 				Error:   &rpcError{Code: -32700, Message: "parse error"},
 			})
@@ -74,7 +83,7 @@ func Serve(stdin io.Reader, stdout, stderr io.Writer, service *ledger.Service) e
 			continue
 		}
 		resp := handle(req, service)
-		if err := writeMessage(stdout, resp); err != nil {
+		if err := writeMessage(stdout, msg.Framed, resp); err != nil {
 			return err
 		}
 	}
@@ -84,16 +93,23 @@ func handle(req request, service *ledger.Service) response {
 	resp := response{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
+		protocolVersion := "2024-11-05"
+		var params initializeParams
+		if len(req.Params) > 0 && json.Unmarshal(req.Params, &params) == nil && params.ProtocolVersion != "" {
+			protocolVersion = params.ProtocolVersion
+		}
 		resp.Result = map[string]any{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": protocolVersion,
 			"capabilities": map[string]any{
-				"tools": map[string]any{},
+				"tools": map[string]any{"listChanged": false},
 			},
 			"serverInfo": map[string]any{
 				"name":    "agent-time-ledger",
 				"version": "0.1.0",
 			},
 		}
+	case "ping":
+		resp.Result = map[string]any{}
 	case "tools/list":
 		resp.Result = map[string]any{"tools": tools()}
 	case "tools/call":
@@ -106,6 +122,10 @@ func handle(req request, service *ledger.Service) response {
 		} else {
 			resp.Result = result
 		}
+	case "resources/list":
+		resp.Result = map[string]any{"resources": []any{}}
+	case "prompts/list":
+		resp.Result = map[string]any{"prompts": []any{}}
 	default:
 		resp.Error = &rpcError{Code: -32601, Message: "method not found"}
 	}
@@ -128,7 +148,8 @@ func handleToolCall(raw json.RawMessage, service *ledger.Service) (callResult, e
 	var err error
 	switch params.Name {
 	case "time_now":
-		result = service.NowResponse()
+		timezone, _ := args["timezone"].(string)
+		result, err = service.NowResponseIn(timezone)
 	case "session_status":
 		result, err = service.SessionStatus()
 	case "mark_start":
@@ -180,7 +201,9 @@ func requiredString(args map[string]any, name string) string {
 
 func tools() []map[string]any {
 	return []map[string]any{
-		tool("time_now", "Return the host clock time.", map[string]any{}),
+		tool("time_now", "Return the current time with timezone and UTC offset.", map[string]any{
+			"timezone": stringSchema("Optional IANA timezone, such as America/Chicago, America/New_York, or UTC"),
+		}),
 		tool("session_status", "Return active session status and elapsed time.", map[string]any{}),
 		tool("mark_start", "Start or reset a named mark.", map[string]any{
 			"name": stringSchema("Mark name"),
@@ -220,31 +243,31 @@ func stringSchema(description string) map[string]any {
 	return map[string]any{"type": "string", "description": description}
 }
 
-func readMessage(reader *bufio.Reader) ([]byte, error) {
+func readMessage(reader *bufio.Reader) (message, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF && strings.TrimSpace(line) != "" {
-			return []byte(line), nil
+			return message{Body: []byte(line)}, nil
 		}
-		return nil, err
+		return message{}, err
 	}
 	line = strings.TrimRight(line, "\r\n")
 	if strings.TrimSpace(line) == "" {
-		return []byte{}, nil
+		return message{}, nil
 	}
 	if !strings.HasPrefix(strings.ToLower(line), "content-length:") {
-		return []byte(line), nil
+		return message{Body: []byte(line)}, nil
 	}
 
 	lengthText := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(line), "content-length:"))
 	length, err := strconv.Atoi(lengthText)
 	if err != nil {
-		return nil, fmt.Errorf("invalid Content-Length: %w", err)
+		return message{}, fmt.Errorf("invalid Content-Length: %w", err)
 	}
 	for {
 		header, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return message{}, err
 		}
 		if strings.TrimSpace(header) == "" {
 			break
@@ -252,14 +275,18 @@ func readMessage(reader *bufio.Reader) ([]byte, error) {
 	}
 	body := make([]byte, length)
 	_, err = io.ReadFull(reader, body)
-	return body, err
+	return message{Body: body, Framed: true}, err
 }
 
-func writeMessage(w io.Writer, value any) error {
+func writeMessage(w io.Writer, framed bool, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(data), data)
+	if framed {
+		_, err = fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(data), data)
+		return err
+	}
+	_, err = fmt.Fprintf(w, "%s\n", data)
 	return err
 }

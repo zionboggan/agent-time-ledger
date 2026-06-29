@@ -81,6 +81,7 @@ JSON responses include a `confidence` value. For v0.1, persisted elapsed calcula
 - `session_status`
 - `mark_start`
 - `mark_elapsed`
+- `mark_list`
 - `stale_check`
 - `ledger_event`
 - `ledger_report`

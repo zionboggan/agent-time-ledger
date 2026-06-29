@@ -158,6 +158,8 @@ func handleToolCall(raw json.RawMessage, service *ledger.Service) (callResult, e
 		result, err = service.MarkElapsed(requiredString(args, "name"))
 	case "stale_check":
 		result, err = staleCheck(args, service)
+	case "mark_list":
+		result, err = service.ListMarks()
 	case "ledger_event":
 		note, _ := args["note"].(string)
 		err = service.LedgerEvent(note)
@@ -211,6 +213,7 @@ func tools() []map[string]any {
 		tool("mark_elapsed", "Return elapsed time for a named mark.", map[string]any{
 			"name": stringSchema("Mark name"),
 		}, "name"),
+		tool("mark_list", "Return all open marks with elapsed time.", map[string]any{}),
 		tool("stale_check", "Check whether a timestamp or mark is stale for a TTL.", map[string]any{
 			"timestamp": stringSchema("RFC3339 timestamp"),
 			"mark":      stringSchema("Existing mark name"),

@@ -123,6 +123,66 @@ func TestStatePersistence(t *testing.T) {
 	}
 }
 
+func TestListMarksEmpty(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	marks, err := service.ListMarks()
+	if err != nil {
+		t.Fatalf("ListMarks returned error: %v", err)
+	}
+	if len(marks) != 0 {
+		t.Fatalf("expected 0 marks, got %d", len(marks))
+	}
+}
+
+func TestListMarksReturnsAll(t *testing.T) {
+	now := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	service := testService(t, now)
+	if _, err := service.StartMark("build"); err != nil {
+		t.Fatalf("StartMark(build) returned error: %v", err)
+	}
+	if _, err := service.StartMark("test"); err != nil {
+		t.Fatalf("StartMark(test) returned error: %v", err)
+	}
+	marks, err := service.ListMarks()
+	if err != nil {
+		t.Fatalf("ListMarks returned error: %v", err)
+	}
+	if len(marks) != 2 {
+		t.Fatalf("expected 2 marks, got %d", len(marks))
+	}
+	names := map[string]struct{}{}
+	for _, m := range marks {
+		names[m.Name] = struct{}{}
+	}
+	if _, ok := names["build"]; !ok {
+		t.Fatal("mark 'build' not in ListMarks result")
+	}
+	if _, ok := names["test"]; !ok {
+		t.Fatal("mark 'test' not in ListMarks result")
+	}
+}
+
+func TestListMarksExcludesDeleted(t *testing.T) {
+	now := time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC)
+	service := testService(t, now)
+	if _, err := service.StartMark("build"); err != nil {
+		t.Fatalf("StartMark returned error: %v", err)
+	}
+	if _, err := service.StartMark("deploy"); err != nil {
+		t.Fatalf("StartMark returned error: %v", err)
+	}
+	if err := service.DeleteMark("deploy"); err != nil {
+		t.Fatalf("DeleteMark returned error: %v", err)
+	}
+	marks, err := service.ListMarks()
+	if err != nil {
+		t.Fatalf("ListMarks returned error: %v", err)
+	}
+	if len(marks) != 1 || marks[0].Name != "build" {
+		t.Fatalf("expected [build], got %v", marks)
+	}
+}
+
 func TestJSONLEventValidity(t *testing.T) {
 	dir := t.TempDir()
 	service := NewService(state.NewStore(dir))

@@ -160,6 +160,10 @@ func handleToolCall(raw json.RawMessage, service *ledger.Service) (callResult, e
 		result, err = staleCheck(args, service)
 	case "mark_list":
 		result, err = service.ListMarks()
+	case "mark_delete":
+		name := requiredString(args, "name")
+		err = service.DeleteMark(name)
+		result = map[string]any{"ok": err == nil, "name": name, "confidence": clock.ConfidenceWallFallback}
 	case "ledger_event":
 		note, _ := args["note"].(string)
 		err = service.LedgerEvent(note)
@@ -214,6 +218,9 @@ func tools() []map[string]any {
 			"name": stringSchema("Mark name"),
 		}, "name"),
 		tool("mark_list", "Return all open marks with elapsed time.", map[string]any{}),
+		tool("mark_delete", "Delete a named mark.", map[string]any{
+			"name": stringSchema("Mark name"),
+		}, "name"),
 		tool("stale_check", "Check whether a timestamp or mark is stale for a TTL.", map[string]any{
 			"timestamp": stringSchema("RFC3339 timestamp"),
 			"mark":      stringSchema("Existing mark name"),

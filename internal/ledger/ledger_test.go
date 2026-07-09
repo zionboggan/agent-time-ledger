@@ -79,6 +79,13 @@ func TestMissingMarkError(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingMarkError(t *testing.T) {
+	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
+	if err := service.DeleteMark("missing"); err == nil {
+		t.Fatal("expected missing mark error")
+	}
+}
+
 func TestSessionStatusNoActiveSession(t *testing.T) {
 	service := testService(t, time.Date(2026, 6, 19, 6, 30, 0, 0, time.UTC))
 	status, err := service.SessionStatus()
